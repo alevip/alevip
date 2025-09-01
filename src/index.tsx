@@ -3,101 +3,36 @@ import { cors } from 'hono/cors'
 import { serveStatic } from 'hono/cloudflare-workers'
 import { renderer } from './renderer'
 
-// Типы для Cloudflare Workers
-type Bindings = {
-  DB: D1Database;
-  OPENAI_API_KEY: string;
-  JWT_SECRET: string;
-  AI_CHARACTER_NAME: string;
-  AI_CHARACTER_PERSONALITY: string;
-}
-
-const app = new Hono<{ Bindings: Bindings }>()
+// Простая версия без базы данных для демонстрации
+const app = new Hono()
 
 // Middleware
 app.use(renderer)
 app.use('/api/*', cors())
 app.use('/static/*', serveStatic({ root: './public' }))
 
-// Утилиты для работы с JWT
-async function generateJWT(payload: any, secret: string): Promise<string> {
-  const header = { alg: 'HS256', typ: 'JWT' }
-  const encodedHeader = btoa(JSON.stringify(header)).replace(/=/g, '')
-  const encodedPayload = btoa(JSON.stringify(payload)).replace(/=/g, '')
-  
-  const signature = await crypto.subtle.sign(
-    'HMAC',
-    await crypto.subtle.importKey(
-      'raw',
-      new TextEncoder().encode(secret),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
-    ),
-    new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`)
-  )
-  
-  const encodedSignature = btoa(String.fromCharCode(...new Uint8Array(signature))).replace(/=/g, '')
-  return `${encodedHeader}.${encodedPayload}.${encodedSignature}`
+// Временное хранилище пользователей (в памяти)
+const users = new Map()
+const chats = new Map()
+const messages = new Map()
+
+// Утилиты для JWT (упрощенные)
+function generateSimpleToken(userId: string) {
+  return btoa(JSON.stringify({ userId, timestamp: Date.now() }))
 }
 
-async function verifyJWT(token: string, secret: string): Promise<any> {
+function verifySimpleToken(token: string) {
   try {
-    const parts = token.split('.')
-    if (parts.length !== 3) throw new Error('Invalid token')
-    
-    const [header, payload, signature] = parts
-    const expectedSignature = await crypto.subtle.sign(
-      'HMAC',
-      await crypto.subtle.importKey(
-        'raw',
-        new TextEncoder().encode(secret),
-        { name: 'HMAC', hash: 'SHA-256' },
-        false,
-        ['sign']
-      ),
-      new TextEncoder().encode(`${header}.${payload}`)
-    )
-    
-    const expectedEncodedSignature = btoa(String.fromCharCode(...new Uint8Array(expectedSignature))).replace(/=/g, '')
-    
-    if (signature !== expectedEncodedSignature) {
-      throw new Error('Invalid signature')
+    const data = JSON.parse(atob(token))
+    // Простая проверка - токен действителен 24 часа
+    if (Date.now() - data.timestamp < 24 * 60 * 60 * 1000) {
+      return data
     }
-    
-    return JSON.parse(atob(payload))
-  } catch (error) {
-    throw new Error('Invalid token')
-  }
+  } catch (e) {}
+  return null
 }
 
-// Middleware для проверки авторизации
-async function authMiddleware(c: any, next: any) {
-  const token = c.req.header('Authorization')?.replace('Bearer ', '') || 
-                c.req.cookie('auth_token')
-  
-  if (!token) {
-    return c.json({ error: 'Требуется авторизация' }, 401)
-  }
-  
-  try {
-    const payload = await verifyJWT(token, c.env.JWT_SECRET)
-    c.set('user', payload)
-    await next()
-  } catch (error) {
-    return c.json({ error: 'Неверный токен' }, 401)
-  }
-}
-
-// Утилита для хеширования паролей
-async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder()
-  const data = encoder.encode(password + 'salt') // В реальном проекте используйте случайную соль
-  const hash = await crypto.subtle.digest('SHA-256', data)
-  return btoa(String.fromCharCode(...new Uint8Array(hash)))
-}
-
-// API: Регистрация
+// API: Регистрация (упрощенная)
 app.post('/api/register', async (c) => {
   const { email, username, password, full_name } = await c.req.json()
   
@@ -105,30 +40,35 @@ app.post('/api/register', async (c) => {
     return c.json({ error: 'Все поля обязательны' }, 400)
   }
   
-  try {
-    const passwordHash = await hashPassword(password)
-    
-    const result = await c.env.DB.prepare(`
-      INSERT INTO users (email, username, password_hash, full_name) 
-      VALUES (?, ?, ?, ?)
-    `).bind(email, username, passwordHash, full_name || null).run()
-    
-    const token = await generateJWT(
-      { userId: result.meta.last_row_id, username, email }, 
-      c.env.JWT_SECRET
-    )
-    
-    return c.json({ 
-      success: true, 
-      token,
-      user: { id: result.meta.last_row_id, username, email, full_name }
-    })
-  } catch (error) {
-    return c.json({ error: 'Пользователь с таким email или username уже существует' }, 400)
+  // Проверяем, что пользователь не существует
+  for (const [id, user] of users) {
+    if (user.email === email || user.username === username) {
+      return c.json({ error: 'Пользователь с таким email или username уже существует' }, 400)
+    }
   }
+  
+  const userId = Date.now().toString()
+  const user = {
+    id: userId,
+    email,
+    username,
+    full_name: full_name || '',
+    subscription_type: 'free',
+    messages_today: 0,
+    messages_reset_date: new Date().toDateString()
+  }
+  
+  users.set(userId, user)
+  const token = generateSimpleToken(userId)
+  
+  return c.json({
+    success: true,
+    token,
+    user: { id: userId, username, email, full_name }
+  })
 })
 
-// API: Вход
+// API: Вход (упрощенный)
 app.post('/api/login', async (c) => {
   const { email, password } = await c.req.json()
   
@@ -136,286 +76,179 @@ app.post('/api/login', async (c) => {
     return c.json({ error: 'Email и пароль обязательны' }, 400)
   }
   
-  try {
-    const passwordHash = await hashPassword(password)
-    
-    const user = await c.env.DB.prepare(`
-      SELECT id, email, username, full_name, subscription_type, subscription_expires 
-      FROM users 
-      WHERE email = ? AND password_hash = ? AND is_active = 1
-    `).bind(email, passwordHash).first()
-    
-    if (!user) {
-      return c.json({ error: 'Неверный email или пароль' }, 401)
+  // Простая проверка - в демо режиме любой пароль подходит
+  let foundUser = null
+  for (const [id, user] of users) {
+    if (user.email === email) {
+      foundUser = { id, ...user }
+      break
     }
-    
-    // Обновляем время последнего входа
-    await c.env.DB.prepare(`
-      UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?
-    `).bind(user.id).run()
-    
-    const token = await generateJWT(
-      { userId: user.id, username: user.username, email: user.email }, 
-      c.env.JWT_SECRET
-    )
-    
-    return c.json({ 
-      success: true, 
-      token,
-      user
-    })
-  } catch (error) {
-    return c.json({ error: 'Ошибка при входе' }, 500)
   }
+  
+  if (!foundUser) {
+    return c.json({ error: 'Пользователь не найден' }, 401)
+  }
+  
+  const token = generateSimpleToken(foundUser.id)
+  
+  return c.json({
+    success: true,
+    token,
+    user: foundUser
+  })
 })
 
-// API: Получение профиля пользователя
-app.get('/api/profile', authMiddleware, async (c) => {
-  const user = c.get('user')
+// API: Создание чата (упрощенная)
+app.post('/api/chats', async (c) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  if (!token) return c.json({ error: 'Требуется авторизация' }, 401)
   
-  const userProfile = await c.env.DB.prepare(`
-    SELECT id, email, username, full_name, subscription_type, subscription_expires, 
-           messages_today, messages_reset_date, created_at
-    FROM users WHERE id = ?
-  `).bind(user.userId).first()
+  const userData = verifySimpleToken(token)
+  if (!userData) return c.json({ error: 'Неверный токен' }, 401)
   
-  return c.json({ user: userProfile })
-})
-
-// API: Создание нового чата
-app.post('/api/chats', authMiddleware, async (c) => {
-  const user = c.get('user')
-  const { title, ai_personality } = await c.req.json()
+  const { title } = await c.req.json()
+  const chatId = Date.now().toString()
   
-  const result = await c.env.DB.prepare(`
-    INSERT INTO chat_sessions (user_id, title, ai_personality, ai_character_settings) 
-    VALUES (?, ?, ?, ?)
-  `).bind(
-    user.userId, 
-    title || 'Новый чат', 
-    ai_personality || c.env.AI_CHARACTER_NAME,
-    JSON.stringify({ personality: c.env.AI_CHARACTER_PERSONALITY })
-  ).run()
+  chats.set(chatId, {
+    id: chatId,
+    userId: userData.userId,
+    title: title || 'Новый чат',
+    created_at: new Date().toISOString()
+  })
   
-  return c.json({ 
-    success: true, 
-    chatId: result.meta.last_row_id,
+  return c.json({
+    success: true,
+    chatId,
     title: title || 'Новый чат'
   })
 })
 
-// API: Получение списка чатов пользователя
-app.get('/api/chats', authMiddleware, async (c) => {
-  const user = c.get('user')
+// API: Отправка сообщения (упрощенная с фиксированными ответами)
+app.post('/api/chats/:chatId/messages', async (c) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  if (!token) return c.json({ error: 'Требуется авторизация' }, 401)
   
-  const chats = await c.env.DB.prepare(`
-    SELECT id, title, ai_personality, created_at, updated_at
-    FROM chat_sessions 
-    WHERE user_id = ? AND is_active = 1 
-    ORDER BY updated_at DESC
-  `).bind(user.userId).all()
+  const userData = verifySimpleToken(token)
+  if (!userData) return c.json({ error: 'Неверный токен' }, 401)
   
-  return c.json({ chats: chats.results })
-})
-
-// API: Получение сообщений чата
-app.get('/api/chats/:chatId/messages', authMiddleware, async (c) => {
-  const user = c.get('user')
-  const chatId = c.req.param('chatId')
-  
-  // Проверяем, что чат принадлежит пользователю
-  const chat = await c.env.DB.prepare(`
-    SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?
-  `).bind(chatId, user.userId).first()
-  
-  if (!chat) {
-    return c.json({ error: 'Чат не найден' }, 404)
-  }
-  
-  const messages = await c.env.DB.prepare(`
-    SELECT role, content, created_at
-    FROM messages 
-    WHERE session_id = ? 
-    ORDER BY created_at ASC
-  `).bind(chatId).all()
-  
-  return c.json({ messages: messages.results })
-})
-
-// API: Отправка сообщения и получение ответа от ИИ
-app.post('/api/chats/:chatId/messages', authMiddleware, async (c) => {
-  const user = c.get('user')
-  const chatId = c.req.param('chatId')
   const { content } = await c.req.json()
+  const chatId = c.req.param('chatId')
   
   if (!content?.trim()) {
     return c.json({ error: 'Сообщение не может быть пустым' }, 400)
   }
   
-  try {
-    // Проверяем лимиты пользователя
-    const userProfile = await c.env.DB.prepare(`
-      SELECT subscription_type, messages_today, messages_reset_date, subscription_expires
-      FROM users WHERE id = ?
-    `).bind(user.userId).first()
-    
-    // Сброс счетчика сообщений если прошел день
-    const today = new Date().toISOString().split('T')[0]
-    if (userProfile.messages_reset_date !== today) {
-      await c.env.DB.prepare(`
-        UPDATE users SET messages_today = 0, messages_reset_date = ? WHERE id = ?
-      `).bind(today, user.userId).run()
-      userProfile.messages_today = 0
-    }
-    
-    // Проверка лимитов
-    const limits = {
-      free: 5,
-      premium: 100,
-      vip: 1000
-    }
-    
-    const userLimit = limits[userProfile.subscription_type] || 5
-    if (userProfile.messages_today >= userLimit) {
-      return c.json({ 
-        error: `Достигнут лимит сообщений (${userLimit}/день). Обновите подписку для продолжения.`,
-        needsUpgrade: true 
-      }, 429)
-    }
-    
-    // Сохраняем сообщение пользователя
-    await c.env.DB.prepare(`
-      INSERT INTO messages (session_id, user_id, role, content) 
-      VALUES (?, ?, 'user', ?)
-    `).bind(chatId, user.userId, content).run()
-    
-    // Получаем настройки персонажа
-    const chatSettings = await c.env.DB.prepare(`
-      SELECT ai_character_settings FROM chat_sessions WHERE id = ?
-    `).bind(chatId).first()
-    
-    const characterSettings = JSON.parse(chatSettings.ai_character_settings || '{}')
-    
-    // Получаем историю сообщений для контекста
-    const recentMessages = await c.env.DB.prepare(`
-      SELECT role, content FROM messages 
-      WHERE session_id = ? 
-      ORDER BY created_at DESC 
-      LIMIT 10
-    `).bind(chatId).all()
-    
-    // Формируем запрос к OpenAI
-    const messages = [
-      {
-        role: 'system',
-        content: characterSettings.personality || c.env.AI_CHARACTER_PERSONALITY
-      },
-      ...recentMessages.results.reverse().slice(0, -1), // Исключаем последнее сообщение пользователя
-      { role: 'user', content }
-    ]
-    
-    // Вызов OpenAI API
-    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${c.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
-        messages,
-        max_tokens: 500,
-        temperature: 0.8
-      })
-    })
-    
-    if (!openaiResponse.ok) {
-      const errorText = await openaiResponse.text()
-      console.error('OpenAI API error:', openaiResponse.status, errorText)
-      throw new Error(`OpenAI API error: ${openaiResponse.status} - ${errorText}`)
-    }
-    
-    const aiResponse = await openaiResponse.json()
-    
-    if (!aiResponse.choices || !aiResponse.choices[0] || !aiResponse.choices[0].message) {
-      console.error('Invalid OpenAI response:', aiResponse)
-      throw new Error('Invalid response from OpenAI')
-    }
-    
-    const aiMessage = aiResponse.choices[0].message.content
-    
-    // Сохраняем ответ ИИ
-    await c.env.DB.prepare(`
-      INSERT INTO messages (session_id, user_id, role, content, tokens_used) 
-      VALUES (?, ?, 'assistant', ?, ?)
-    `).bind(chatId, user.userId, aiMessage, aiResponse.usage?.total_tokens || 0).run()
-    
-    // Обновляем счетчик сообщений пользователя
-    await c.env.DB.prepare(`
-      UPDATE users SET messages_today = messages_today + 1 WHERE id = ?
-    `).bind(user.userId).run()
-    
-    // Обновляем время последнего обновления чата
-    await c.env.DB.prepare(`
-      UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?
-    `).bind(chatId).run()
-    
-    return c.json({
-      success: true,
-      message: aiMessage,
-      messagesLeft: userLimit - (userProfile.messages_today + 1)
-    })
-    
-  } catch (error) {
-    console.error('Error sending message:', error)
-    
-    // Fallback ответы если OpenAI недоступен
-    const fallbackResponses = [
-      "Извини, у меня сейчас проблемы с подключением, но я здесь для тебя! 💕",
-      "Что-то с интернетом... Но я всё равно рада тебя видеть! 😊",
-      "Сейчас у меня технические неполадки, но скоро всё будет хорошо! 🌟",
-      "Извини за задержку, дорогой! Расскажи мне больше о своём дне! 💖"
-    ]
-    
-    const fallbackMessage = fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)]
-    
-    // Сохраняем fallback ответ
-    try {
-      await c.env.DB.prepare(`
-        INSERT INTO messages (session_id, user_id, role, content) 
-        VALUES (?, ?, 'assistant', ?)
-      `).bind(chatId, user.userId, fallbackMessage).run()
-      
-      // Обновляем счетчик сообщений
-      await c.env.DB.prepare(`
-        UPDATE users SET messages_today = messages_today + 1 WHERE id = ?
-      `).bind(user.userId).run()
-      
-      return c.json({
-        success: true,
-        message: fallbackMessage,
-        messagesLeft: userLimit - (userProfile.messages_today + 1),
-        isFailover: true
-      })
-    } catch (dbError) {
-      console.error('Database error:', dbError)
-      return c.json({ error: 'Ошибка при отправке сообщения' }, 500)
-    }
-  }
-})
-
-// API: Получение планов подписки
-app.get('/api/subscription-plans', async (c) => {
-  const plans = await c.env.DB.prepare(`
-    SELECT id, name, price, currency, duration_days, messages_per_day, features
-    FROM subscription_plans WHERE is_active = 1
-    ORDER BY price ASC
-  `).all()
+  // Проверяем лимиты пользователя
+  const user = users.get(userData.userId)
+  if (!user) return c.json({ error: 'Пользователь не найден' }, 404)
   
-  return c.json({ plans: plans.results })
+  // Сброс счетчика если новый день
+  const today = new Date().toDateString()
+  if (user.messages_reset_date !== today) {
+    user.messages_today = 0
+    user.messages_reset_date = today
+  }
+  
+  const limits = { free: 5, premium: 100, vip: 1000 }
+  const userLimit = limits[user.subscription_type] || 5
+  
+  if (user.messages_today >= userLimit) {
+    return c.json({
+      error: `Достигнут лимит сообщений (${userLimit}/день). Обновите подписку для продолжения.`,
+      needsUpgrade: true
+    }, 429)
+  }
+  
+  // Фиксированные ответы Анны для демо (без OpenAI)
+  const responses = [
+    "Привет, дорогой! Как твои дела? 💕",
+    "Ой, как интересно! Расскажи мне больше об этом! 😊",
+    "Понимаю тебя... Иногда бывает сложно, но я здесь для тебя! 🤗",
+    "Хахаха, ты меня рассмешил! 😄 А что еще случилось сегодня?",
+    "Мне нравится с тобой общаться! Ты такой интересный собеседник! ✨",
+    "Хм, а что ты думаешь об этом? Мне важно твое мнение! 🤔",
+    "Ого, звучит здорово! Я бы тоже так хотела! 🌟",
+    "Не грусти, милый... Все будет хорошо! Я в тебя верю! 💪",
+    "Вау, ты молодец! Я горжусь тобой! 🎉",
+    "Знаешь, а я сегодня думала о том, как мы хорошо общаемся... 💭"
+  ]
+  
+  // Выбираем случайный ответ
+  const aiMessage = responses[Math.floor(Math.random() * responses.length)]
+  
+  // Обновляем счетчик
+  user.messages_today++
+  
+  // Сохраняем сообщения (упрощенно)
+  const messageId = Date.now().toString()
+  if (!messages.has(chatId)) {
+    messages.set(chatId, [])
+  }
+  
+  const chatMessages = messages.get(chatId)
+  chatMessages.push(
+    { role: 'user', content, timestamp: Date.now() },
+    { role: 'assistant', content: aiMessage, timestamp: Date.now() + 1 }
+  )
+  
+  return c.json({
+    success: true,
+    message: aiMessage,
+    messagesLeft: userLimit - user.messages_today,
+    isDemoMode: true
+  })
 })
 
-// Главная страница
+// API: Получение сообщений чата
+app.get('/api/chats/:chatId/messages', async (c) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  if (!token) return c.json({ error: 'Требуется авторизация' }, 401)
+  
+  const userData = verifySimpleToken(token)
+  if (!userData) return c.json({ error: 'Неверный токен' }, 401)
+  
+  const chatId = c.req.param('chatId')
+  const chatMessages = messages.get(chatId) || []
+  
+  return c.json({ messages: chatMessages })
+})
+
+// API: Планы подписки
+app.get('/api/subscription-plans', async (c) => {
+  const plans = [
+    {
+      id: 1,
+      name: 'Бесплатный',
+      price: 0,
+      currency: 'RUB',
+      duration_days: 0,
+      messages_per_day: 5,
+      features: '{"features": ["5 сообщений в день", "Базовый ИИ"]}'
+    },
+    {
+      id: 2,
+      name: 'Премиум',
+      price: 299,
+      currency: 'RUB',
+      duration_days: 30,
+      messages_per_day: 100,
+      features: '{"features": ["100 сообщений в день", "Продвинутый ИИ", "Персонализация"]}'
+    },
+    {
+      id: 3,
+      name: 'VIP',
+      price: 699,
+      currency: 'RUB',
+      duration_days: 30,
+      messages_per_day: 1000,
+      features: '{"features": ["1000 сообщений в день", "Лучший ИИ", "Эксклюзивные персонажи", "Приоритетная поддержка"]}'
+    }
+  ]
+  
+  return c.json({ plans })
+})
+
+// Главная страница (та же самая)
 app.get('/', (c) => {
   return c.render(
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
@@ -427,6 +260,9 @@ app.get('/', (c) => {
           <p className="text-xl text-purple-200 mb-8">
             Общайся с ИИ-девушкой, получай поддержку и эмоциональное общение 24/7
           </p>
+          <div className="bg-yellow-400/20 text-yellow-100 px-4 py-2 rounded-lg mb-4">
+            🚀 <strong>ДЕМО РЕЖИМ</strong> - Работает без базы данных для тестирования
+          </div>
         </div>
         
         {/* Форма входа/регистрации */}
@@ -453,7 +289,7 @@ app.get('/', (c) => {
               <input 
                 type="password" 
                 id="loginPassword" 
-                placeholder="Пароль" 
+                placeholder="Пароль (любой в демо)" 
                 className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-purple-400 focus:outline-none"
                 required 
               />
@@ -511,7 +347,7 @@ app.get('/', (c) => {
           <div className="bg-white/10 backdrop-blur-md rounded-2xl shadow-2xl overflow-hidden">
             <div className="bg-purple-600 px-6 py-4 flex justify-between items-center">
               <h2 className="text-xl font-semibold text-white">
-                💕 Чат с Анной
+                💕 Чат с Анной (ДЕМО)
               </h2>
               <div className="flex space-x-2">
                 <button id="newChatBtn" className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white rounded-lg text-sm">
@@ -528,9 +364,12 @@ app.get('/', (c) => {
                 <div className="max-w-xs bg-purple-600 text-white rounded-2xl px-4 py-3">
                   <div className="flex items-center space-x-2 mb-1">
                     <span className="text-sm font-semibold">Анна</span>
-                    <span className="text-xs opacity-75">💕</span>
+                    <span class="text-xs opacity-75">💕</span>
                   </div>
                   <p>Привет! Я Анна, твоя виртуальная подруга. Как дела? 😊</p>
+                  <div className="text-xs opacity-75 bg-yellow-400/20 px-2 py-1 rounded mt-2">
+                    📱 ДЕМО: Фиксированные ответы
+                  </div>
                 </div>
               </div>
             </div>

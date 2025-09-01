@@ -1,20 +1,13 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ai-chat-bot",
-  "main": "src/index.tsx",
+  "main": "src/index.tsx", 
   "compatibility_date": "2025-09-01",
   "compatibility_flags": ["nodejs_compat"],
-  "pages_build_output_dir": "./dist",
+  "pages_build_output_dir": "./dist"
 
-  // D1 Database для хранения пользователей, чатов и сообщений
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "chatbot-production",
-      "database_id": "will-be-set-after-creation"
-    }
-  ]
-
-  // Переменные окружения будут настроены через .dev.vars локально
-  // и через wrangler secret для продакшена
+  // D1 Database убрана для простого деплоя
+  // Полная версия с базой данных в src/index-full.tsx
+  
+  // Переменные окружения опциональны для демо версии
 }
