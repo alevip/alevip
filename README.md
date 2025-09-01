@@ -136,7 +136,9 @@ AI_CHARACTER_PERSONALITY=Дружелюбная виртуальная подр�
 ---
 
 ## 📚 Документация
+- **[QUICK_START.md](QUICK_START.md)** - 🚀 Быстрый старт и развертывание
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** - Подробная инструкция по развертыванию
+- **[GitHub Репозиторий](https://github.com/alevip/alevip)** - Исходный код
 - **[Резервная копия](https://page.gensparksite.com/project_backups/tooluse_ivYwXeF8SWmcyTsgpH5KFQ.tar.gz)** - Скачать полный архив проекта
 
 ---
