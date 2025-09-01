@@ -87,10 +87,10 @@ subscription_plans (id, name, price, messages_per_day, features)
 
 ### Статус развертывания
 - **Платформа**: Cloudflare Pages
-- **Статус**: ✅ Полностью работает с OpenAI API
-- **Технологии**: Hono + TypeScript + Cloudflare D1 + OpenAI API
+- **Статус**: 🚀 Готов к деплою (простая версия)
+- **Технологии**: Hono + TypeScript + In-Memory Storage
 - **Локальный URL**: https://3000-i2aa1i22k9yglbqrboj0t-6532622b.e2b.dev
-- **OpenAI Integration**: ✅ Активна и протестирована
+- **Полная версия**: Доступна в src/index-full.tsx (с D1 + OpenAI)
 
 ### 📦 Резервная копия проекта
 - **URL**: https://page.gensparksite.com/project_backups/tooluse_ivYwXeF8SWmcyTsgpH5KFQ.tar.gz
@@ -136,8 +136,10 @@ AI_CHARACTER_PERSONALITY=Дружелюбная виртуальная подр�
 ---
 
 ## 📚 Документация
+- **[VERSION_INFO.md](VERSION_INFO.md)** - 🔄 Информация о версиях (простая/полная)
 - **[QUICK_START.md](QUICK_START.md)** - 🚀 Быстрый старт и развертывание
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** - Подробная инструкция по развертыванию
+- **[DEPLOY_FIX.md](DEPLOY_FIX.md)** - 🔧 Исправление проблем деплоя
 - **[GitHub Репозиторий](https://github.com/alevip/alevip)** - Исходный код
 - **[Резервная копия](https://page.gensparksite.com/project_backups/tooluse_ivYwXeF8SWmcyTsgpH5KFQ.tar.gz)** - Скачать полный архив проекта
 
