@@ -86,11 +86,13 @@ subscription_plans (id, name, price, messages_per_day, features)
 ## 🚀 Развертывание
 
 ### Статус развертывания
-- **Платформа**: Cloudflare Pages
 - **Статус**: 🚀 Готов к деплою (простая версия)
 - **Технологии**: Hono + TypeScript + In-Memory Storage
 - **Локальный URL**: https://3000-i2aa1i22k9yglbqrboj0t-6532622b.e2b.dev
 - **Полная версия**: Доступна в src/index-full.tsx (с D1 + OpenAI)
+
+### 🚀 **Быстрый деплой на Vercel:**
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/alevip/alevip&project-name=ai-chat-bot&repository-name=ai-chat-bot)
 
 ### 📦 Резервная копия проекта
 - **URL**: https://page.gensparksite.com/project_backups/tooluse_ivYwXeF8SWmcyTsgpH5KFQ.tar.gz
