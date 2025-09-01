@@ -87,9 +87,10 @@ subscription_plans (id, name, price, messages_per_day, features)
 
 ### Статус развертывания
 - **Платформа**: Cloudflare Pages
-- **Статус**: ✅ Готов к развертыванию
+- **Статус**: ✅ Полностью работает с OpenAI API
 - **Технологии**: Hono + TypeScript + Cloudflare D1 + OpenAI API
 - **Локальный URL**: https://3000-i2aa1i22k9yglbqrboj0t-6532622b.e2b.dev
+- **OpenAI Integration**: ✅ Активна и протестирована
 
 ### 📦 Резервная копия проекта
 - **URL**: https://page.gensparksite.com/project_backups/tooluse_ivYwXeF8SWmcyTsgpH5KFQ.tar.gz

@@ -330,10 +330,18 @@ app.post('/api/chats/:chatId/messages', authMiddleware, async (c) => {
     })
     
     if (!openaiResponse.ok) {
-      throw new Error('OpenAI API error')
+      const errorText = await openaiResponse.text()
+      console.error('OpenAI API error:', openaiResponse.status, errorText)
+      throw new Error(`OpenAI API error: ${openaiResponse.status} - ${errorText}`)
     }
     
     const aiResponse = await openaiResponse.json()
+    
+    if (!aiResponse.choices || !aiResponse.choices[0] || !aiResponse.choices[0].message) {
+      console.error('Invalid OpenAI response:', aiResponse)
+      throw new Error('Invalid response from OpenAI')
+    }
+    
     const aiMessage = aiResponse.choices[0].message.content
     
     // Сохраняем ответ ИИ
@@ -360,7 +368,39 @@ app.post('/api/chats/:chatId/messages', authMiddleware, async (c) => {
     
   } catch (error) {
     console.error('Error sending message:', error)
-    return c.json({ error: 'Ошибка при отправке сообщения' }, 500)
+    
+    // Fallback ответы если OpenAI недоступен
+    const fallbackResponses = [
+      "Извини, у меня сейчас проблемы с подключением, но я здесь для тебя! 💕",
+      "Что-то с интернетом... Но я всё равно рада тебя видеть! 😊",
+      "Сейчас у меня технические неполадки, но скоро всё будет хорошо! 🌟",
+      "Извини за задержку, дорогой! Расскажи мне больше о своём дне! 💖"
+    ]
+    
+    const fallbackMessage = fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)]
+    
+    // Сохраняем fallback ответ
+    try {
+      await c.env.DB.prepare(`
+        INSERT INTO messages (session_id, user_id, role, content) 
+        VALUES (?, ?, 'assistant', ?)
+      `).bind(chatId, user.userId, fallbackMessage).run()
+      
+      // Обновляем счетчик сообщений
+      await c.env.DB.prepare(`
+        UPDATE users SET messages_today = messages_today + 1 WHERE id = ?
+      `).bind(user.userId).run()
+      
+      return c.json({
+        success: true,
+        message: fallbackMessage,
+        messagesLeft: userLimit - (userProfile.messages_today + 1),
+        isFailover: true
+      })
+    } catch (dbError) {
+      console.error('Database error:', dbError)
+      return c.json({ error: 'Ошибка при отправке сообщения' }, 500)
+    }
   }
 })
 
